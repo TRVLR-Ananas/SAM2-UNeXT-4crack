@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import timm
 from sam2.build_sam import build_sam2
-from timm.models.layers import trunc_normal_   
+from timm.layers import trunc_normal_
 
 
 class Adapter(nn.Module):
@@ -139,8 +139,13 @@ class SAM2UNeXT(nn.Module):
         self.up4 = Up(128, 128)
         self.head = nn.Conv2d(128, 1, 1)
         
+        # 修改最后的head，移除固定的上采样
+        self.head = nn.Conv2d(128, 1, 1)
+
 
     def forward(self, x):
+        input_size = x.shape[-2:]  # 保存原始输入尺寸
+
         x1_s, x2_s, x3_s, x4_s = self.sam(x)
         x_d = self.dino(F.interpolate(x, size=(448, 448), mode='bilinear'))[-1]
 
@@ -155,6 +160,10 @@ class SAM2UNeXT(nn.Module):
         x = self.up3(x, x3)
         x = self.up2(x, x2)
         x = self.up1(x, x1)
-        out = self.head(x)
-        out = F.interpolate(self.head(x), scale_factor=2, mode='bilinear')
+        # out = self.head(x)
+        # out = F.interpolate(self.head(x), scale_factor=2, mode='bilinear')
+
+        # 上采样到原始输入尺寸
+        out = F.interpolate(self.head(x), size=input_size, mode='bilinear')
+
         return out

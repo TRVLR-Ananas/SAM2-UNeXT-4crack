@@ -30,16 +30,44 @@ parser.add_argument("--weight_decay", default=5e-4, type=float)
 args = parser.parse_args()
 
 
-def structure_loss(pred, mask):
-    weit = 1 + 5*torch.abs(F.avg_pool2d(mask, kernel_size=31, stride=1, padding=15) - mask)
-    wbce = F.binary_cross_entropy_with_logits(pred, mask, reduce='none')
-    wbce = (weit*wbce).sum(dim=(2, 3)) / weit.sum(dim=(2, 3))
-    pred = torch.sigmoid(pred)
-    inter = ((pred * mask)*weit).sum(dim=(2, 3))
-    union = ((pred + mask)*weit).sum(dim=(2, 3))
-    wiou = 1 - (inter + 1)/(union - inter+1)
-    return (wbce + wiou).mean()
+# def structure_loss(pred, mask):
+#     weit = 1 + 5*torch.abs(F.avg_pool2d(mask, kernel_size=31, stride=1, padding=15) - mask)
+#     wbce = F.binary_cross_entropy_with_logits(pred, mask, reduce='none')
+#     wbce = (weit*wbce).sum(dim=(2, 3)) / weit.sum(dim=(2, 3))
+#     pred = torch.sigmoid(pred)
+#     inter = ((pred * mask)*weit).sum(dim=(2, 3))
+#     union = ((pred + mask)*weit).sum(dim=(2, 3))
+#     wiou = 1 - (inter + 1)/(union - inter+1)
+#     return (wbce + wiou).mean()
 
+
+def structure_loss(pred, mask, alpha=0.8):
+    # 原有结构损失
+    weit = 1 + 5 * torch.abs(F.avg_pool2d(mask, kernel_size=31, stride=1, padding=15) - mask)
+
+    wbce = F.binary_cross_entropy_with_logits(pred, mask, reduce='none')
+    wbce = (weit * wbce).sum(dim=(2, 3)) / weit.sum(dim=(2, 3))
+
+    pred_sigmoid = torch.sigmoid(pred)
+    inter = ((pred_sigmoid * mask) * weit).sum(dim=(2, 3))
+    union = ((pred_sigmoid + mask) * weit).sum(dim=(2, 3))
+    wiou = 1 - (inter + 1) / (union - inter + 1)
+
+    # 原有结构损失
+    structure_loss = wbce + wiou
+
+    # 新增：Focal Loss成分处理极端不平衡
+    focal_loss = focal_bce_loss(pred, mask, alpha=alpha, gamma=2.0)
+
+    # 组合：保留原有结构感知，加入Focal处理类别不平衡
+    return (0.7 * structure_loss + 0.3 * focal_loss).mean()
+
+
+def focal_bce_loss(pred, mask, alpha=0.8, gamma=2.0):
+    bce = F.binary_cross_entropy_with_logits(pred, mask, reduction='none')
+    pt = torch.exp(-bce)
+    focal_weight = alpha * (1 - pt) ** gamma
+    return (focal_weight * bce).mean()
 
 def main(args):    
     dataset = FullDataset(args.train_image_path, args.train_mask_path, 1024, mode='train')
